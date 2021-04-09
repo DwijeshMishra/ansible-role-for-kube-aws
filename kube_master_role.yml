@@ -1,0 +1,4 @@
+---
+- hosts: 54.193.57.124
+  roles:
+    - role: kube_master_install         

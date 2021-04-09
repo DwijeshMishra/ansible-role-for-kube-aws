@@ -1,0 +1,122 @@
+---
+- name: Install docker
+  yum:
+   name: docker
+   state: present
+
+# start  service   
+- name: State docker service
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+# tasks file for kube_master_install
+- name: Add repository
+  yum_repository:
+    name: Kubernetes
+    description: EPEL YUM repo
+    baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+    enabled: yes
+    gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+    repo_gpgcheck: no
+
+
+# Installing docker     
+- name: Install kubeadm
+  yum: 
+   name: "{{ item }}"
+   state: present
+  loop: "{{ package_name }}" 
+
+- name: creatring docker json file
+  file: 
+    path: "/etc/docker/daemon.json" 
+    state: touch 
+
+# changing drive to systemd
+- name: chnaging docker driver 
+  copy:
+     src: files/daemon.json 
+     dest: /etc/docker/daemon.json
+
+- name: Enabling kubelet service
+  service:
+     name: kubelet
+     daemon_reload: yes
+     state: started
+     enabled: yes     
+#  
+- name: restart docker
+  service:
+    name: docker
+    state: restarted
+  
+
+#remove all mounting files like swap it help in the time to start kube master
+- name: remove swapfile
+  mount:
+   path: "{{ item }}"
+   fstype: swap
+   state: absent
+  loop:
+   - swap
+   - none
+     
+#Installing iprote-tc 
+- name: Installing iproute-tc
+  yum:
+    name: iproute-tc
+    state: present
+    update_cache: yes
+
+- name: start bridge setup
+  shell: "echo 1 > /proc/sys/net/bridge/bridge-nf-call-iptables"
+    
+
+#Initializing kubeadm  
+- name: Initializing the kubeadm
+  shell: "kubeadm init --pod-network-cidr=10.244.0.0/16 --ignore-preflight-errors=Swap --ignore-preflight-errors=NumCPU --ignore-preflight-errors=Mem"
+  register: kubeadm
+  ignore_errors: yes
+
+- name: Print kubeadm return
+  debug:
+    msg: "{{ kubeadm }}"
+
+# create conf file      
+- name: create k8s conf file
+  file:
+    path: /etc/sysctl.d/k8s.conf
+    state: touch
+
+# insert iptable to conf file    
+- name: configuring ip tables
+  copy:
+    src: files/k8s.conf      
+    dest: /etc/sysctl.d/k8s.conf
+   
+
+# start conf    
+- shell:
+    cmd: sysctl --system   
+
+- name: copy token.sh form locally to slve nodes
+  copy: 
+    src: /root/ws/token.sh
+    dest: /root/token.sh
+
+- name: kubelet service restart and enable
+  service:
+    name: kubelet
+    enabled: true
+    state: restarted    
+
+#make token.sh executable 
+- name: make executable token.sh
+  command: "chmod +x /root/token.sh"
+- name: reset kubeadm 
+  command: kubeadm reset -f
+  
+- name: run token.sh
+  command: "sh /root/token.sh"  

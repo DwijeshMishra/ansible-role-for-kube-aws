@@ -1,0 +1,6 @@
+---
+# vars file for kube_master_install
+package_name: 
+  - kubelet
+  - kubeadm
+  - kubectl  

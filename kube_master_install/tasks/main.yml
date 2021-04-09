@@ -1,0 +1,113 @@
+---
+- name: Install docker
+  yum:
+   name: docker
+   state: present
+
+# start  service   
+- name: State docker service
+  service:
+    name: docker
+    state: started
+    enabled: true
+
+# tasks file for kube_master_install
+- name: Add repository
+  yum_repository:
+    name: Kubernetes
+    description: EPEL YUM repo
+    baseurl: https://packages.cloud.google.com/yum/repos/kubernetes-el7-\$basearch
+    enabled: yes
+    gpgkey: https://packages.cloud.google.com/yum/doc/yum-key.gpg https://packages.cloud.google.com/yum/doc/rpm-package-key.gpg
+    repo_gpgcheck: no
+
+
+
+# Installing docker     
+- name: Install kubeadm
+  yum: 
+   name: "{{ item }}"
+   state: present
+  loop: "{{ package_name }}" 
+
+- name: creatring docker json file
+  file: 
+    path: "/etc/docker/daemon.json" 
+    state: touch 
+
+# changing drive to systemd
+- name: chnaging docker driver 
+  copy:
+     src: files/daemon.json 
+     dest: /etc/docker/daemon.json
+
+- name: Enabling kubelet service
+  service:
+    name: kubelet
+    daemon_reload: yes
+    state: started
+    enabled: yes     
+#  
+- name: restart docker
+  service:
+    name: docker
+    state: restarted
+  
+
+# pulling docker images required for kube master
+- name: pull  the docker images   
+  command: kubeadm config images pull
+
+
+#remove all mounting files like swap it help in the time to start kube master
+- name: remove swapfile
+  mount:
+   path: "{{ item }}"
+   fstype: swap
+   state: absent
+  loop:
+   - swap
+   - none
+     
+#Installing iprote-tc 
+- name: Installing iproute-tc
+  yum:
+    name: iproute-tc
+    state: present
+    update_cache: yes
+
+- name: start bridge setup
+  lineinfile:
+    path: "/proc/sys/net/bridge/bridge-nf-call-iptables"      
+    line: "1"
+    state: present
+
+#Initializing kubeadm  
+- name: Initializing the kubeadm
+  shell: "kubeadm init --pod-network-cidr=10.244.0.0/16 --ignore-preflight-errors=Swap --ignore-preflight-errors=NumCPU --ignore-preflight-errors=Mem"
+  register: kubeadm
+  ignore_errors: yes
+
+- name: Print kubeadm return
+  debug:
+    msg: "{{ kubeadm }}"
+
+
+- name: use master node as user
+  shell: "{{ item }}"
+  loop:
+    - "mkdir -p $HOME/.kube"
+    - "sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config"
+    - "sudo chown $(id -u):$(id -g) $HOME/.kube/config"
+
+- name: Adding flannel network
+  shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+ 
+      
+
+- name: Joining token
+  shell: "kubeadm token create --print-join-command"
+  register: token
+
+- name: Storing token into a file
+  local_action: copy content={{ token.stdout_lines[0] }} dest=/root/ws/token.sh  

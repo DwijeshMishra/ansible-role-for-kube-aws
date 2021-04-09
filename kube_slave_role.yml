@@ -1,0 +1,5 @@
+---
+- hosts: 54.176.139.110,3.101.26.171
+  roles:
+    - role: kube_slave_install   
+
